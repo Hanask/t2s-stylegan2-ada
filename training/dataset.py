@@ -7,20 +7,68 @@
 # license agreement from NVIDIA CORPORATION is strictly prohibited.
 
 """Streaming images and labels from datasets created with dataset_tool.py."""
+from miscc.config import cfg
 
 import os
 import numpy as np
 import zipfile
 import PIL.Image
 import json
-import torch
 import dnnlib
 import pickle
+
+import torch
+from torch.autograd import Variable
 
 try:
     import pyspng
 except ImportError:
     pyspng = None
+
+def prepare_data(data):
+    imgs, captions, captions_lens, class_ids, keys, wrong_caps, wrong_caps_len, wrong_cls_id = data
+
+    # sort data by the length in a decreasing order
+    sorted_cap_lens, sorted_cap_indices = \
+        torch.sort(captions_lens, 0, True)
+
+    real_imgs = []
+    for i in range(len(imgs)):
+        imgs[i] = imgs[i][sorted_cap_indices]
+        if cfg.CUDA:
+            real_imgs.append(Variable(imgs[i]).cuda())
+        else:
+            real_imgs.append(Variable(imgs[i]))
+
+    captions = captions[sorted_cap_indices].squeeze()
+    class_ids = class_ids[sorted_cap_indices].numpy()
+    keys = [keys[i] for i in sorted_cap_indices.numpy()]
+
+    if cfg.CUDA:
+        captions = Variable(captions).cuda()
+        sorted_cap_lens = Variable(sorted_cap_lens).cuda()
+    else:
+        captions = Variable(captions)
+        sorted_cap_lens = Variable(sorted_cap_lens)
+
+    ##
+    w_sorted_cap_lens, w_sorted_cap_indices = \
+        torch.sort(wrong_caps_len, 0, True)
+
+    wrong_caps = wrong_caps[w_sorted_cap_indices].squeeze()
+    wrong_cls_id = wrong_cls_id[w_sorted_cap_indices].numpy()
+
+    if cfg.CUDA:
+        wrong_caps = Variable(wrong_caps).cuda()
+        w_sorted_cap_lens = Variable(w_sorted_cap_lens).cuda()
+    else:
+        wrong_caps = Variable(wrong_caps)
+        w_sorted_cap_lens = Variable(w_sorted_cap_lens)
+
+    return [
+        real_imgs, captions, sorted_cap_lens, class_ids, keys, wrong_caps,
+        w_sorted_cap_lens, wrong_cls_id
+    ]
 
 #----------------------------------------------------------------------------
 
