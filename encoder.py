@@ -41,6 +41,7 @@ class Encoder(object):
 
         batch_size = self.batch_size
         cnt = 0
+        dict_emb = {}
         for _ in range(1):
             for step, data in enumerate(self.data_loader, 0):
                 cnt += batch_size
@@ -56,5 +57,7 @@ class Encoder(object):
                     captions, cap_lens, hidden)
                 words_embs, sent_emb = words_embs.detach(
                 ), sent_emb.detach()
+                dict_emb[keys[0]] = sent_emb
+        return dict_emb
 # remove words_embs 
 # detach() ?
