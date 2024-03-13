@@ -10,7 +10,7 @@ import torch.backends.cudnn as cudnn
 from PIL import Image
 
 from miscc.config import cfg
-from model import RNN_ENCODER
+from damsm_model import RNN_ENCODER
 from training.dataset import prepare_data
 
 import os 
@@ -23,12 +23,13 @@ class Encoder(object):
         torch.cuda.set_device(cfg.GPU_ID)
         cudnn.benchmark = True
 
+        self.batch_size = cfg.TRAIN.BATCH_SIZE
         self.n_words = n_words
-        self.ixtoword = ixtoword
+        # self.ixtoword = ixtoword
         self.data_loader = data_loader
-        self.num_batches = len(self.data_loader)
+        # self.num_batches = len(self.data_loader)
 
-    def sent_encoder(self):
+    def sent_encoder_dict(self):
         text_encoder = RNN_ENCODER(self.n_words,
                                        nhidden=cfg.TEXT.EMBEDDING_DIM)
         state_dict = \
@@ -47,8 +48,8 @@ class Encoder(object):
                 cnt += batch_size
                 if step % 10 == 9:
                     print('step: ', step)
-                if step > 49:
-                    break
+                # if step > 49:
+                #     break
                 imgs, captions, cap_lens, class_ids, keys, wrong_caps, wrong_caps_len, wrong_cls_id = prepare_data(
                     data)
 
@@ -57,7 +58,9 @@ class Encoder(object):
                     captions, cap_lens, hidden)
                 words_embs, sent_emb = words_embs.detach(
                 ), sent_emb.detach()
-                dict_emb[keys[0]] = sent_emb
+                for i, key in enumerate(keys):
+                    dict_emb[key] = sent_emb[i]
         return dict_emb
 # remove words_embs 
-# detach() ?
+    
+# TODO: save the dictionary to a file

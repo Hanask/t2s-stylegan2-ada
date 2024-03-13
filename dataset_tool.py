@@ -19,6 +19,10 @@ import click
 import numpy as np
 import PIL.Image
 from tqdm import tqdm
+from training.dataset import TextDataset
+from miscc.config import cfg
+import torchvision.transforms as transforms
+from encoder import Encoder
 
 #----------------------------------------------------------------------------
 
@@ -317,10 +321,59 @@ def open_dest(dest: str) -> Tuple[str, Callable[[str, Union[bytes, str]], None],
 
 #----------------------------------------------------------------------------
 
+# 
+def load_embeddings():
+    embedding_file_path = 'embeddings/embedding_source.pickle'
+
+    # Check if the pickle file exists
+    if os.path.exists(embedding_file_path):
+        print("Loading the existing dictionary from the pickle file:", embedding_file_path)
+        # Load the existing dictionary from the pickle file
+        with open(embedding_file_path, 'rb') as file:
+            dict_emb = pickle.load(file)
+    else:
+        print("Creating the dictionary from the text encoder")
+        # Get data loader
+        imsize = cfg.TREE.BASE_SIZE * (2**(cfg.TREE.BRANCH_NUM - 1))
+
+        image_transform = transforms.Compose([
+            # transforms.Scale(int(imsize * 76 / 64)),
+            transforms.Resize(int(imsize * 65 / 64)),
+            # transforms.Scale(int(imsize)),
+            transforms.RandomCrop(imsize),
+            # transforms.Resize(imsize),
+            transforms.RandomHorizontalFlip()
+        ])
+
+        split_dir = 'text'
+        dataset = TextDataset(cfg.DATA_DIR,
+                                split_dir,
+                                base_size=cfg.TREE.BASE_SIZE,
+                                transform=image_transform)
+        assert dataset
+        #check this line
+        dataloader = torch.utils.data.DataLoader(dataset,
+                                                batch_size=cfg.TRAIN.BATCH_SIZE)
+            
+        # Define models and go to train/evaluate
+        algo = Encoder(dataloader, dataset.n_words, dataset.ixtoword)
+
+        dict_emb = algo.sent_encoder_dict()
+
+        # Save the dictionary to the pickle file
+        with open(embedding_file_path, 'wb') as file:
+            pickle.dump(dict_emb, file)
+
+        print("Dictionary saved to pickle file:", embedding_file_path)
+
+    return dict_emb
+
+#----------------------------------------------------------------------------
+
 @click.command()
 @click.pass_context
 @click.option('--source', help='Directory or archive name for input dataset', required=True, metavar='PATH')
-@click.option('--embedding_source', help='Embedding Soruce', required=True, metavar='PATH')
+# @click.option('--embedding_source', help='Embedding Soruce', required=True, metavar='PATH')
 @click.option('--dest', help='Output directory or archive name for output dataset', required=True, metavar='PATH')
 @click.option('--max-images', help='Output only up to `max-images` images', type=int, default=None)
 @click.option('--transform', help='Input crop/resize mode', type=click.Choice(['center-crop', 'center-crop-wide']))
@@ -332,8 +385,7 @@ def convert_dataset(
     dest: str,
     max_images: Optional[int],
     transform: Optional[str],
-    resolution: Optional[Tuple[int, int]],
-    embedding_source: str
+    resolution: Optional[Tuple[int, int]]
 ):
     """Convert an image dataset into a dataset archive usable with StyleGAN2 ADA PyTorch.
 
@@ -402,7 +454,8 @@ def convert_dataset(
     """
 
     PIL.Image.init() # type: ignore
-    dict_emb = CPU_Unpickler(open(embedding_source,"rb")).load()   #Unloading embedding dictionary 
+
+    dict_emb = load_embeddings()
 
     if dest == '':
         ctx.fail('--dest output filename or directory must not be an empty string')
@@ -421,7 +474,8 @@ def convert_dataset(
     for idx, image in tqdm(enumerate(input_iter), total=num_files):
         idx_str = f'{idx:08d}'
         image_path = image["image_path"]
-        image_key = image_path.split("/")[-1].replace(".jpg","")
+        print("image_path: ", image_path)
+        image_key = image_path.split("\\")[-1].replace(".jpg","")
         archive_fname = f'{idx_str[:5]}/{image_key}.png'
         # Apply crop and resize.
         img = transform_image(image['img'])
@@ -459,6 +513,7 @@ def convert_dataset(
         img.save(image_bits, format='png', compress_level=0, optimize=False)
         save_bytes(os.path.join(archive_root_dir, archive_fname), image_bits.getbuffer())
         labels.append([archive_fname, image['label']] if image['label'] is not None else None)
+        print("image_key: ", image_key)
         emb = dict_emb[image_key]
         
         images_paths.append(image_key)

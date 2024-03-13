@@ -93,15 +93,12 @@ def get_imgs(img_path, imsize, bbox=None, transform=None, normalize=None):
         img = transform(img)
 
     ret = []
-    if cfg.GAN.B_DCGAN:
-        ret = [normalize(img)]
-    else:
-        for i in range(cfg.TREE.BRANCH_NUM):
-            if i < (cfg.TREE.BRANCH_NUM - 1):
-                re_img = transforms.Resize(imsize[i])(img)
-            else:
-                re_img = img
-            ret.append(normalize(re_img))
+    for i in range(cfg.TREE.BRANCH_NUM):
+        if i < (cfg.TREE.BRANCH_NUM - 1):
+            re_img = transforms.Resize(imsize[i])(img)
+        else:
+            re_img = img
+        ret.append(normalize(re_img))
 
     return ret
 #----------------------------------------------------------------------------
@@ -315,8 +312,10 @@ class ImageFolderDataset(Dataset):
     #Loading Image Embeddings
     def _load_image_emb(self, raw_idx):
         fname = self._image_fnames[raw_idx].replace(".png",".pickle")
+        # print("fname:",fname)
         with self._open_file(fname) as f:
-            embs = pickle.load(f)
+            embs = (pickle.load(f),)
+            # print("embs:",embs)
             try:
                 embs = torch.stack(embs).detach().cpu().numpy()
                 mean = np.mean(embs,axis=0)
@@ -349,7 +348,7 @@ class ImageFolderDataset(Dataset):
 class TextDataset(data.Dataset):
     def __init__(self,
                  data_dir,
-                 split='train',
+                 split='text',
                  base_size=64,
                  transform=None,
                  target_transform=None):
@@ -436,9 +435,8 @@ class TextDataset(data.Dataset):
                           (filenames[i], cnt))
         return all_captions
 
-    def build_dictionary(self, train_captions, test_captions):
+    def build_dictionary(self, captions):
         word_counts = defaultdict(float)
-        captions = train_captions + test_captions
         for sent in captions:
             for word in sent:
                 word_counts[word] += 1
@@ -455,40 +453,31 @@ class TextDataset(data.Dataset):
             ixtoword[ix] = w
             ix += 1
 
-        train_captions_new = []
-        for t in train_captions:
+        captions_new = []
+        for t in captions:
             rev = []
             for w in t:
                 if w in wordtoix:
                     rev.append(wordtoix[w])
-            train_captions_new.append(rev)
-
-        test_captions_new = []
-        for t in test_captions:
-            rev = []
-            for w in t:
-                if w in wordtoix:
-                    rev.append(wordtoix[w])
-            test_captions_new.append(rev)
+            captions_new.append(rev)
 
         return [
-            train_captions_new, test_captions_new, ixtoword, wordtoix,
-            len(ixtoword)
+            captions_new, ixtoword, wordtoix,len(ixtoword)
         ]
 
     def load_text_data(self, data_dir, split):
-        filepath = os.path.join(data_dir, 'captions.pickle')
-        train_names = self.load_filenames(data_dir, 'train')
-        test_names = self.load_filenames(data_dir, 'test')
+        filepath = os.path.join(data_dir, 'captions2.pickle')
+        filenames = self.load_filenames(data_dir, split)
+        # test_names = self.load_filenames(data_dir, 'test')
         if not os.path.isfile(filepath):
-            train_captions = self.load_captions(data_dir, train_names)
-            test_captions = self.load_captions(data_dir, test_names)
+            captions = self.load_captions(data_dir, filenames)
+            # test_captions = self.load_captions(data_dir, test_names)
 
-            train_captions, test_captions, ixtoword, wordtoix, n_words = \
-                self.build_dictionary(train_captions, test_captions)
+            captions, ixtoword, wordtoix, n_words = \
+                self.build_dictionary(captions)
             with open(filepath, 'wb') as f:
                 pickle.dump(
-                    [train_captions, test_captions, ixtoword, wordtoix],
+                    [captions, ixtoword, wordtoix],
                     f,
                     protocol=2)
                 print('Save to: ', filepath)
@@ -496,19 +485,11 @@ class TextDataset(data.Dataset):
             with open(filepath, 'rb') as f:
                 print("filepath", filepath)
                 x = pickle.load(f)
-                train_captions, test_captions = x[0], x[1]
-                ixtoword, wordtoix = x[2], x[3]
+                captions = x[0]
+                ixtoword, wordtoix = x[1], x[2]
                 del x
                 n_words = len(ixtoword)
                 print('Load from: ', filepath)
-        if split == 'train':
-            # a list of list: each list contains
-            # the indices of words in a sentence
-            captions = train_captions
-            filenames = train_names
-        else:  # split=='test'
-            captions = test_captions
-            filenames = test_names
         return filenames, captions, ixtoword, wordtoix, n_words
 
     def load_class_id(self, data_dir, total_num):
